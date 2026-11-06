@@ -1,122 +1,204 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
+import type { User } from "@supabase/supabase-js";
+import { supabase } from "./supabase";
+import "./App.css";
+
+type Message = {
+  id: number;
+  user_id: string;
+  username: string;
+  content: string;
+  created_at: string;
+};
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [posting, setPosting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function loadMessages() {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setMessages(data ?? []);
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    async function initialize() {
+      const { data } = await supabase.auth.getUser();
+
+      if (active) {
+        setUser(data.user);
+      }
+
+      await loadMessages();
+
+      if (active) {
+        setLoading(false);
+      }
+    }
+
+    void initialize();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
+      },
+    );
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  async function signIn() {
+    setError("");
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "github",
+      options: {
+        redirectTo:
+          window.location.origin + import.meta.env.BASE_URL,
+      },
+    });
+
+    if (error) {
+      setError(error.message);
+    }
+  }
+
+  async function signOut() {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setError(error.message);
+    }
+  }
+
+  async function postMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const text = content.trim();
+
+    if (!user || !text || posting) return;
+
+    setPosting(true);
+    setError("");
+
+    const username =
+      user.user_metadata.user_name ??
+      user.user_metadata.preferred_username ??
+      user.user_metadata.name ??
+      "GitHub User";
+
+    const { error } = await supabase.from("messages").insert({
+      user_id: user.id,
+      username: String(username),
+      content: text,
+    });
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setContent("");
+      await loadMessages();
+    }
+
+    setPosting(false);
+  }
+
+  if (loading) {
+    return <main>Loading guestbook...</main>;
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
+    <main className="container">
+      <header>
+        <h1>Guestbook</h1>
+        <p>Leave a message for everyone!</p>
+
+        {user ? (
+          <div className="account">
+            {user.user_metadata.avatar_url && (
+              <img
+                className="avatar"
+                src={user.user_metadata.avatar_url}
+                alt="GitHub avatar"
+              />
+            )}
+            <span>
+              Signed in as{" "}
+              {user.user_metadata.user_name ??
+                user.user_metadata.name ??
+                "GitHub User"}
+            </span>
+            <button onClick={signOut}>Sign Out</button>
+          </div>
+        ) : (
+          <button onClick={signIn}>
+            Sign In with GitHub
+          </button>
+        )}
+      </header>
+
+      {error && <p className="error">{error}</p>}
+
+      {user ? (
+        <form onSubmit={postMessage}>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Write your message..."
+            maxLength={1000}
+            required
+          />
+
+          <button
+            type="submit"
+            disabled={posting || !content.trim()}
+          >
+            {posting ? "Posting..." : "Post Message"}
+          </button>
+        </form>
+      ) : (
+        <p>Sign in with GitHub to leave a message.</p>
+      )}
+
+      <section>
+        <h2>Messages</h2>
+
+        {messages.length === 0 && (
+          <p>No messages yet. Be the first!</p>
+        )}
+
+        {messages.map((message) => (
+          <article key={message.id} className="message">
+            <div className="message-header">
+              <strong>{message.username}</strong>
+              <time>
+                {new Date(message.created_at).toLocaleString()}
+              </time>
+            </div>
+
+            <p>{message.content}</p>
+          </article>
+        ))}
       </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    </main>
+  );
 }
-
-export default App
